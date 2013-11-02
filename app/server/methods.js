@@ -1,3 +1,11 @@
+// we used to store a single userId on the package, now we store a userIds list
+var canEditPackage = function(pkg, userId) {
+  var userId = userId || Meteor.userId();
+  
+  return userId && (pkg.userId === userId) || _.include(pkg.userIds, userId);
+}
+
+
 Meteor.methods({
   publish: function(pkgInfo) {
 
@@ -19,6 +27,14 @@ Meteor.methods({
       // Name
       _.presenceOf   ('name'),
       _.lengthOf     ('name', { gte: 1, lte: 30 }),
+      function(doc){  
+        if(doc.name != null && doc.name.indexOf(" ") != -1){   
+            return {
+                field: 'name',
+                message: 'You cannot have spaces in your package name.'
+            };
+        }
+      },
 
       // Description
       _.presenceOf   ('description'),
@@ -97,7 +113,7 @@ Meteor.methods({
     if (pkgRecord) {
 
       // Only the owner can update it
-      if (pkgRecord.userId !== Meteor.userId())
+      if (! canEditPackage(pkgRecord))
         throw new Meteor.Error(401, "That ain't yr package son!");
 
       // Add new version
@@ -138,7 +154,7 @@ Meteor.methods({
 
       // Setup new package record
       var newPackage = _.extend(pkgInfo, {
-        userId: Meteor.userId(),
+        userIds: [Meteor.userId()],
         latest: pkgInfo.version,
         createdAt: now,
         updatedAt: now,
@@ -206,7 +222,8 @@ Meteor.methods({
     
     Installs.insert({time:new Date(), version: version, isUpdate: isUpdate});
   },
-  deletePackage:function(packageName) {
+  
+  deletePackage: function(packageName) {
     Logs.insert({
       name: 'method.deletepackage',
       userId: Meteor.userId(),
@@ -214,18 +231,30 @@ Meteor.methods({
       stamp: new Date()
     });
     
-    if(Meteor.user()) {
-      var package = Packages.findOne({name:packageName});
-      if(package.userId === Meteor.userId()) {
-        Packages.remove({name:packageName,userId:Meteor.userId()});
-        return "Package removed";
-      }
-      else
-      {
-        return "You're not authorized to delete this package";
-      }
-    }else{
+    var package = Packages.findOne({name: packageName});
+    if (! canEditPackage(package))
       return "You're not authorized to delete this package";
-    }
+    
+    Packages.remove({name: packageName});
+    return "Package removed";
+  },
+  
+  addPackageMaintainer: function(packageName, username) {
+    Logs.insert({
+      name: 'method.addPackageMaintainer',
+      userId: Meteor.userId(),
+      packageName: packageName,
+      stamp: new Date()
+    });
+    
+    var package = Packages.findOne({name: packageName});
+    if (! package || ! canEditPackage(package))
+      return "You're not authorized to change this package";
+    
+    var user = Meteor.users.findOne({username: username});
+    if (! user)
+      return "No user with that username exists";
+    
+    Packages.update(package._id, {$addToSet: {userIds: user._id}});
   }
 });
